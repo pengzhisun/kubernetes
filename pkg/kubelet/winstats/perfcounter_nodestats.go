@@ -20,7 +20,6 @@ package winstats
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -217,15 +216,26 @@ func (p *perfCounterNodeStatsClient) getCPUUsageNanoCores() uint64 {
 }
 
 func getSystemUUID() (string, error) {
-	result, err := exec.Command("wmic", "csproduct", "get", "UUID").Output()
+	// Use PowerShell cmdlet "Get-CimInstance" instead of "wmic csproduct get
+	// uuid" for the following reasons:
+	// 1. The WMI command-line tool (Wmic) is deprecated. Use PowerShell cmdlets
+	// instead.
+	// https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/hh831568(v=ws.11)#wmi-providers
+	// 2. The PowerShell cmdlet "Get-CimObject" was removed from PowerShell 6
+	// and are no longer supported.
+	// https://github.com/MicrosoftDocs/PowerShell-Docs/issues/5156#issuecomment-558253083
+	command := "(Get-CimInstance -Class Win32_ComputerSystemProduct).UUID"
+	args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Restricted", "-Command", command}
+	result, err := exec.Command("powershell.exe", args...).CombinedOutput()
 	if err != nil {
-		return "", err
+		klog.Errorf("unable to get system uuid, reason: %q, detail: %q", err, result)
 	}
-	fields := strings.Fields(string(result))
-	if len(fields) != 2 {
-		return "", fmt.Errorf("received unexpected value retrieving vm uuid: %q", string(result))
-	}
-	return fields[1], nil
+
+	systemUUID := strings.TrimRight(string(result), "\r\n")
+
+	klog.V(5).Infof("system uuid: %q", systemUUID)
+
+	return systemUUID, nil
 }
 
 func getPhysicallyInstalledSystemMemoryBytes() (uint64, error) {
